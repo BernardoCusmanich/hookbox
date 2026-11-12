@@ -10,14 +10,20 @@ const isHttps = resolveAppUrl()?.startsWith("https://") ?? false;
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!);
 const supabaseWs = `${supabaseUrl.protocol === "https:" ? "wss:" : "ws:"}//${supabaseUrl.host}`;
 
+// Barra de ferramentas da Vercel (comentários e feedback): só nas previews, que já ficam atrás
+// do Deployment Protection. Origens conforme https://vercel.com/docs/vercel-toolbar/managing-toolbar
+const toolbar = process.env.VERCEL_ENV === "preview";
+const extra = (sources: string) => (toolbar ? ` ${sources}` : "");
+
 const csp = [
   "default-src 'self'",
   // O Next injeta scripts inline para hidratação; 'unsafe-eval' só no dev (React Refresh).
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://avatars.githubusercontent.com",
-  "font-src 'self' data:",
-  `connect-src 'self' ${supabaseUrl.origin} ${supabaseWs}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}${extra("https://vercel.live")}`,
+  `style-src 'self' 'unsafe-inline'${extra("https://vercel.live")}`,
+  `img-src 'self' data: blob: https://avatars.githubusercontent.com${extra("https://vercel.live https://vercel.com")}`,
+  `font-src 'self' data:${extra("https://vercel.live https://assets.vercel.com")}`,
+  `connect-src 'self' ${supabaseUrl.origin} ${supabaseWs}${extra("https://vercel.live wss://ws-us3.pusher.com")}`,
+  ...(toolbar ? ["frame-src 'self' https://vercel.live"] : []),
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
