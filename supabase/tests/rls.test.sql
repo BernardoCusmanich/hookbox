@@ -1,7 +1,7 @@
 -- Testes de RLS, RPCs e triggers. Rode com: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(33);
+select plan(45);
 
 -- Usuários de teste --------------------------------------------------------
 insert into auth.users (id, email, email_confirmed_at, raw_app_meta_data, aud, role) values
@@ -147,6 +147,86 @@ update auth.users set encrypted_password = 'trocada', email = 'hacker@example.co
   where id = '00000000-0000-0000-0000-00000000000d';
 select is((select email from auth.users where id = '00000000-0000-0000-0000-00000000000d'),
   'demo@example.com', 'e-mail da conta demo não muda');
+
+-- Guardas da conta demo no banco --------------------------------------------
+create function pg_temp.service() returns void language sql as $$
+  select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  select set_config('role', 'service_role', true);
+$$;
+
+select pg_temp.logout();
+-- Um banco local já semeado tem a org demo; remove (dentro da transação, que sofre rollback).
+delete from public.organizations where slug = 'demo';
+insert into public.organizations (name, slug, is_demo) values ('Demo', 'demo', true);
+insert into public.memberships (org_id, user_id, role)
+  select id, '00000000-0000-0000-0000-00000000000d', 'member' from public.organizations where slug = 'demo';
+insert into public.endpoints (org_id, name, slug)
+  select id, 'Pedidos', 'demopedidos1' from public.organizations where slug = 'demo';
+insert into public.endpoints (org_id, name, slug)
+  select id, 'Bridge', 'demobridge01' from public.organizations where slug = 'demo';
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000d');
+select lives_ok(
+  $$ update public.endpoints set name = 'Pedidos renomeado' where slug = 'demopedidos1' $$,
+  'demo muda o nome de um endpoint'
+);
+select throws_ok(
+  $$ update public.endpoints set forward_url = 'https://example.com/hook' where slug = 'demopedidos1' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não muda forward_url'
+);
+select throws_ok(
+  $$ update public.endpoints set forward_enabled = true where slug = 'demopedidos1' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não muda forward_enabled'
+);
+select throws_ok(
+  $$ update public.endpoints set secret_ciphertext = 'abc' where slug = 'demopedidos1' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não muda o segredo'
+);
+select throws_ok(
+  $$ insert into public.endpoints (org_id, name, slug, forward_url)
+     select id, 'Com forward', 'demoforward1', 'https://example.com/hook' from public.organizations where slug = 'demo' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não cria endpoint com forward_url'
+);
+select lives_ok(
+  $$ insert into public.endpoints (org_id, name, slug)
+     select id, 'Extra', 'demoextra001' from public.organizations where slug = 'demo' $$,
+  'demo cria endpoint sem encaminhamento'
+);
+select throws_ok(
+  $$ delete from public.endpoints where slug = 'demopedidos1' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não apaga endpoint de exemplo'
+);
+select lives_ok(
+  $$ delete from public.endpoints where slug = 'demoextra001' $$,
+  'demo apaga endpoint que ela mesma criou'
+);
+
+-- O RLS já barra membro comum; promove a owner para exercitar o trigger.
+select pg_temp.logout();
+update public.memberships set role = 'owner'
+  where user_id = '00000000-0000-0000-0000-00000000000d'
+    and org_id = (select id from public.organizations where slug = 'demo');
+select pg_temp.login('00000000-0000-0000-0000-00000000000d');
+select throws_ok(
+  $$ update public.organizations set name = 'Hackeada' where slug = 'demo' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não renomeia a org demo'
+);
+select throws_ok(
+  $$ delete from public.organizations where slug = 'demo' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não apaga a org demo'
+);
+
+-- Service role (seed e cron) não é afetada.
+select pg_temp.service();
+select lives_ok(
+  $$ update public.endpoints set forward_url = 'https://example.com/hook' where slug = 'demopedidos1' $$,
+  'service role muda forward_url do endpoint demo'
+);
+select lives_ok(
+  $$ delete from public.endpoints where slug = 'demobridge01' $$,
+  'service role apaga endpoint de exemplo'
+);
+select pg_temp.logout();
 
 select * from finish();
 rollback;

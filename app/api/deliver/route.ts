@@ -44,7 +44,9 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
   const { data: req, error } = await supabase
     .from("requests")
-    .select("id, org_id, method, headers, body, body_encoding, endpoints ( forward_url, forward_enabled )")
+    .select(
+      "id, org_id, method, headers, body, body_encoding, endpoints ( forward_url, forward_enabled ), organizations ( is_demo )",
+    )
     .eq("id", requestId)
     .maybeSingle();
   if (error) {
@@ -52,9 +54,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false }, { status: 500 });
   }
   const endpoint = req?.endpoints;
-  if (!req || !endpoint || !endpoint.forward_enabled || !endpoint.forward_url) {
-    return done("encaminhamento desligado ou endpoint removido");
-  }
 
   const attempt = (Number.parseInt(request.headers.get("upstash-retried") ?? "0", 10) || 0) + 1;
 
@@ -68,6 +67,16 @@ export async function POST(request: NextRequest) {
       duration_ms: durationMs,
     });
     if (insertError) console.error("[deliver] falha ao gravar entrega", insertError.code);
+  }
+
+  // Na demo pública não há encaminhamento real: registra a tentativa e encerra.
+  if (req?.organizations?.is_demo) {
+    await record(null, "Encaminhamento desativado na demo.", null);
+    return done("encaminhamento desativado na demo");
+  }
+
+  if (!req || !endpoint || !endpoint.forward_enabled || !endpoint.forward_url) {
+    return done("encaminhamento desligado ou endpoint removido");
   }
 
   // Revalida a URL (SSRF) antes de cada envio.

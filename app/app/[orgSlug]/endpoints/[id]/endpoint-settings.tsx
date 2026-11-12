@@ -130,7 +130,12 @@ export function EndpointSettings({
                     Reenvia cada requisição para a URL abaixo, com até 5 novas tentativas.
                   </p>
                 </div>
-                <Switch id="ep-forward" checked={forwardEnabled} onCheckedChange={setForwardEnabled} />
+                <Switch
+                  id="ep-forward"
+                  checked={forwardEnabled}
+                  onCheckedChange={setForwardEnabled}
+                  disabled={isDemo}
+                />
               </div>
               <Input
                 type="url"
@@ -140,10 +145,12 @@ export function EndpointSettings({
                 maxLength={2048}
                 onChange={(e) => setForwardUrl(e.target.value)}
                 aria-label="URL de encaminhamento"
+                disabled={isDemo}
               />
               <p className="text-xs text-muted-foreground">
                 Só https e endereços públicos. IPs internos, de rede privada e de metadata da cloud são recusados.
               </p>
+              {isDemo && <p className="text-xs text-muted-foreground">Indisponível na demo pública</p>}
             </div>
 
             <Button type="submit" disabled={saving} className="self-start">
@@ -174,21 +181,28 @@ export function EndpointSettings({
                     {secret ? <EyeOffIcon /> : <EyeIcon />}
                     {secret ? "Ocultar" : "Revelar"}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={regenerate} disabled={secretPending}>
+                  <Button variant="outline" size="sm" onClick={regenerate} disabled={secretPending || isDemo}>
                     <KeyRoundIcon />
                     Gerar novo
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={clearSecret} disabled={secretPending}>
+                  <Button variant="ghost" size="sm" onClick={clearSecret} disabled={secretPending || isDemo}>
                     Remover
                   </Button>
                 </div>
               </>
             ) : (
-              <Button variant="outline" size="sm" className="self-start" onClick={regenerate} disabled={secretPending}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={regenerate}
+                disabled={secretPending || isDemo}
+              >
                 <KeyRoundIcon />
                 Gerar segredo
               </Button>
             )}
+            {isDemo && <p className="text-xs text-muted-foreground">Indisponível na demo pública</p>}
           </div>
 
           <Separator />
