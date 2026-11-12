@@ -6,8 +6,7 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 
 **Demo ao vivo:** https://hookbox-demo.vercel.app (botão “Entrar na demo”, sem cadastro)
 
-<!-- TODO: trocar pelo GIF do inspetor recebendo requisições em tempo real -->
-![Inspetor do Hookbox](public/inspector.png)
+![Inspetor do Hookbox recebendo webhooks do legacy-bridge em tempo real, com assinaturas válidas e inválidas](public/inspector.gif)
 
 ## Funcionalidades
 
