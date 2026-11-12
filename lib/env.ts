@@ -57,7 +57,12 @@ function parseClient(): ClientEnv {
 }
 
 function parseServer(): ServerEnv {
-  const parsed = serverSchema.safeParse(process.env);
+  const parsed = serverSchema.safeParse({
+    ...process.env,
+    // A integração do Upstash na Vercel Marketplace cria KV_REST_API_*; aceita os dois nomes.
+    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL,
+    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN,
+  });
   if (!parsed.success) {
     throw new Error(`Variáveis de ambiente do servidor inválidas:\n${format(parsed.error)}`);
   }

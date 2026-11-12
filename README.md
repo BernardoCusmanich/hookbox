@@ -4,7 +4,7 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 
 [![CI](https://github.com/BernardoCusmanich/hookbox/actions/workflows/ci.yml/badge.svg)](https://github.com/BernardoCusmanich/hookbox/actions/workflows/ci.yml)
 
-**Demo ao vivo:** https://hookbox.vercel.app (botão “Entrar na demo”, sem cadastro)
+**Demo ao vivo:** https://hookbox-demo.vercel.app (botão “Entrar na demo”, sem cadastro)
 
 <!-- TODO: trocar pelo GIF do inspetor recebendo requisições em tempo real -->
 ![Inspetor do Hookbox](public/inspector.png)
@@ -50,14 +50,14 @@ x-bridge-signature = "sha256=" + hex(HMAC-SHA256(segredo, "{x-bridge-timestamp}.
 2. Aponte o agente para a URL de ingestão do endpoint:
 
    ```powershell
-   [Environment]::SetEnvironmentVariable("Bridge__Webhook__Url", "https://hookbox.vercel.app/in/<slug>", "Machine")
+   [Environment]::SetEnvironmentVariable("Bridge__Webhook__Url", "https://hookbox-demo.vercel.app/in/<slug>", "Machine")
    [Environment]::SetEnvironmentVariable("Bridge__Webhook__Secret", "<segredo do Hookbox>", "Machine")
    ```
 
    Ou, no desenvolvimento, com user-secrets:
 
    ```bash
-   dotnet user-secrets set "Bridge:Webhook:Url" "https://hookbox.vercel.app/in/<slug>"
+   dotnet user-secrets set "Bridge:Webhook:Url" "https://hookbox-demo.vercel.app/in/<slug>"
    dotnet user-secrets set "Bridge:Webhook:Secret" "<segredo do Hookbox>"
    ```
 
@@ -120,7 +120,7 @@ Outros comandos: `npm run db:types` regenera `lib/supabase/types.ts` a partir do
 2. **Upstash:** crie um banco Redis e pegue o token e as signing keys do QStash no console.
 3. **Vercel:** importe o repositório e cadastre todas as variáveis do `.env.example` (sem `QSTASH_URL`). `APP_URL` precisa ser a URL pública final, porque é ela que o QStash chama e que o `/api/deliver` usa para conferir a assinatura.
 4. Faça o deploy. O build falha se faltar alguma variável.
-5. Rode o seed apontando para produção, uma vez: `npm run seed` com as variáveis de produção num `.env.production.local`.
+5. Rode o seed apontando para produção, uma vez: `npm run seed` com as variáveis de produção num `.env.production.local`. Atenção: enquanto esse arquivo existir, ele tem prioridade sobre o `.env.local`, e o seed vai sempre para produção.
 6. O cron (`vercel.json`) roda todo dia às 03:00 UTC e chama `/api/cron/cleanup` com `Authorization: Bearer $CRON_SECRET`. A Vercel envia esse header sozinha quando a variável `CRON_SECRET` existe.
 
 ## Decisões técnicas
@@ -131,7 +131,7 @@ Outros comandos: `npm run db:types` regenera `lib/supabase/types.ts` a partir do
 
 **Por que redigir headers sensíveis.** Um inspetor de webhooks guarda dados de terceiros e mostra esses dados para todos os membros da organização. `authorization`, `cookie`, `proxy-authorization` e `x-api-key` costumam carregar credenciais de longa duração, que não ajudam a depurar e virariam um risco se fossem gravadas. Por isso viram `[redacted]` antes do INSERT e não são reenviadas no encaminhamento. Os headers `x-vercel-*` são descartados pelo mesmo motivo: a plataforma os injeta (inclusive um token OIDC do projeto) e eles não vieram do provedor. A assinatura HMAC continua funcionando, porque usa headers próprios (`x-bridge-*`).
 
-**Proteção contra SSRF.** Encaminhar para uma URL escolhida pelo usuário é um convite para alcançar a rede interna, como o metadata da cloud em `169.254.169.254`. A URL é validada ao salvar e de novo antes de cada envio: só `https`, sem usuário e senha na URL, sem o próprio domínio do Hookbox, e nenhum dos IPs resolvidos (`dns.lookup` com `all: true`) pode ser loopback, privado, link-local, CGNAT, multicast, reservado ou IPv4 embutido em IPv6. Validar só antes do fetch abre espaço para DNS rebinding (o domínio resolve para um IP público na checagem e para um interno na conexão). Por isso o envio usa um `undici.Agent` com um `lookup` próprio, que confere o IP no momento em que o socket conecta, e IP literal é checado à parte. Redirects não são seguidos (`redirect: 'manual'`) e contam como falha permanente, e cada tentativa tem timeout de 10 s.
+**Proteção contra SSRF.** Encaminhar para uma URL escolhida pelo usuário é um convite para alcançar a rede interna, como o metadata da cloud em `169.254.169.254`. A URL é validada ao salvar e de novo antes de cada envio: só `https`, sem usuário e senha na URL, sem o próprio domínio do Hookbox, e nenhum dos IPs resolvidos (`dns.lookup` com `all: true`) pode ser loopback, privado, link-local, CGNAT, multicast, reservado ou IPv4 embutido em IPv6. Validar só antes do fetch abre espaço para DNS rebinding (o domínio resolve para um IP público na checagem e para um interno na conexão). Por isso o envio usa um `undici.Agent` com um `lookup` próprio, que confere o IP no momento em que o socket conecta, e IP literal é checado à parte. Redirects não são seguidos (`redirect: 'manual'`) e contam como falha permanente, e cada tentativa tem timeout de 10 s. Para evitar loops (um endpoint encaminhando para outro, inclusive por uma URL alternativa do mesmo deploy), uma requisição que chega com `x-hookbox-request-id` é gravada, mas não é reencaminhada.
 
 **Outras escolhas.**
 - `proxy.ts` (o antigo `middleware.ts` do Next.js 16) renova a sessão, protege `/app/**` e manda para o onboarding quem ainda não tem organização.

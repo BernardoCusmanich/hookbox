@@ -109,8 +109,11 @@ async function handle(request: NextRequest, { params }: Context): Promise<Respon
     return json({ ok: false, error: "internal_error" }, 500, method);
   }
 
-  // 8. Encaminhamento.
-  if (endpoint.forward_enabled) {
+  // 8. Encaminhamento. Uma requisição que já veio de um encaminhamento do Hookbox
+  // (tem x-hookbox-request-id) é gravada, mas não é reencaminhada: evita loops entre
+  // endpoints, inclusive por URLs alternativas do mesmo deploy.
+  const isHookboxForward = request.headers.has("x-hookbox-request-id");
+  if (endpoint.forward_enabled && !isHookboxForward) {
     try {
       await enqueueDelivery(inserted.id);
     } catch {
