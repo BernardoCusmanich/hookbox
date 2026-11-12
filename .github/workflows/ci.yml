@@ -40,3 +40,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Valida RLS, triggers e as travas da conta demo rodando os testes pgTAP em um Postgres local
+  # (só banco e auth; o restante da stack do Supabase fica de fora).
+  db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+      - run: supabase start -x studio,imgproxy,mailpit,storage-api,edge-runtime,logflare,vector,supavisor,realtime,postgres-meta,postgrest,kong
+      - run: supabase test db
