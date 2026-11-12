@@ -5,7 +5,7 @@ import { serverEnv } from "@/lib/env";
 import { sendForward } from "@/lib/forward";
 import { validateForwardUrl } from "@/lib/ssrf";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendEmail } from "@/lib/email";
+import { emailEnabled, sendEmail } from "@/lib/email";
 import { acquireAlertThrottle, qstashReceiver } from "@/lib/upstash";
 
 export const runtime = "nodejs";
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     async notifyFailure(info) {
       const result = await sendFailureAlert(info, {
         appUrl: serverEnv.APP_URL,
-        enabled: Boolean(serverEnv.RESEND_API_KEY),
+        enabled: emailEnabled(),
         ownerEmails,
         acquireThrottle: acquireAlertThrottle,
         sendEmail,

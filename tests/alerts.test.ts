@@ -42,7 +42,7 @@ function setup(over: Partial<AlertDeps> & { owners?: string[]; throttleFree?: bo
 }
 
 describe("sendFailureAlert", () => {
-  it("sem chave do Resend: não consulta nada nem envia", async () => {
+  it("sem SMTP configurado: não consulta nada nem envia", async () => {
     const { calls, deps } = setup({ enabled: false });
     assert.equal(await sendFailureAlert(INFO, deps), "disabled");
     assert.equal(calls.owners.length + calls.throttle.length + calls.sent.length, 0);

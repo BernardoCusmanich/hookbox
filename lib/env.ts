@@ -22,6 +22,12 @@ const base64Key32 = z
     message: "precisa ser 32 bytes em base64 (openssl rand -base64 32)",
   });
 
+/** Variável opcional: vazia conta como ausente. */
+const optionalString = z
+  .string()
+  .optional()
+  .transform((v) => v?.trim() || undefined);
+
 const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   APP_URL: z.url().transform((v) => v.replace(/\/+$/, "")),
@@ -36,16 +42,14 @@ const serverSchema = z.object({
   CRON_SECRET: z.string().min(16),
   DEMO_EMAIL: z.email(),
   DEMO_PASSWORD: z.string().min(8),
-  /** Opcional: sem ela, os alertas de falha de entrega não são enviados. */
-  RESEND_API_KEY: z
-    .string()
-    .optional()
-    .transform((v) => v || undefined),
-  /** Remetente dos alertas, de um domínio verificado no Resend. O padrão do Resend só entrega para o dono da conta. */
-  ALERT_EMAIL_FROM: z
-    .string()
-    .optional()
-    .transform((v) => v || "Hookbox <onboarding@resend.dev>"),
+  /** SMTP dos alertas de falha de entrega. Sem SMTP_HOST, os alertas ficam desligados. */
+  SMTP_HOST: optionalString,
+  SMTP_PORT: z.coerce.number().int().positive().default(465),
+  SMTP_USER: optionalString,
+  /** Senhas de app do Gmail são mostradas em blocos com espaços; os espaços são removidos. */
+  SMTP_PASSWORD: optionalString.transform((v) => v?.replace(/\s+/g, "")),
+  /** Remetente dos alertas. Padrão: o próprio SMTP_USER. */
+  ALERT_EMAIL_FROM: optionalString,
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

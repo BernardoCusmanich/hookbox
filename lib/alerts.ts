@@ -5,7 +5,7 @@
  * Regras:
  * - vai só para os owners da organização;
  * - no máximo um e-mail por endpoint por hora (trava no Redis);
- * - sem chave do Resend configurada, nada é enviado (local e CI).
+ * - sem SMTP configurado, nada é enviado (local e CI).
  */
 
 export const ALERT_THROTTLE_SECONDS = 60 * 60;
@@ -26,7 +26,7 @@ export type Email = { to: string[]; subject: string; html: string; text: string 
 export type AlertDeps = {
   /** Endereço do app, sem barra no final. */
   appUrl: string;
-  /** false quando não há chave do Resend: o alerta é ignorado. */
+  /** false quando não há SMTP configurado: o alerta é ignorado. */
   enabled: boolean;
   ownerEmails(orgId: string): Promise<string[]>;
   /** true se conseguiu a trava (nenhum alerta deste endpoint na última hora). */
