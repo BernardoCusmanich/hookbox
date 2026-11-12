@@ -95,7 +95,14 @@ npm run dev                   # http://localhost:3000
 
 **Encaminhamento no desenvolvimento.** A proteção contra SSRF recusa `localhost` e IPs privados também localmente. Para testar uma entrega de verdade, use uma URL pública (por exemplo, um endpoint temporário do webhook.site).
 
-**Login com GitHub local.** Crie um OAuth App com callback `http://127.0.0.1:54321/auth/v1/callback`, troque `enabled = true` em `[auth.external.github]` no `supabase/config.toml` e exporte `SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID` e `SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET`.
+**Login com GitHub local.** Crie um OAuth App com o redirect URI `http://127.0.0.1:54321/auth/v1/callback` e grave as credenciais em `supabase/.env` (fora do git), que o Supabase CLI lê sozinho:
+
+```bash
+SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID=...
+SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET=...
+```
+
+Depois rode `npx supabase stop && npx supabase start`. Sem esse arquivo, o Supabase local sobe normalmente, e só o botão do GitHub falha. O mesmo OAuth App pode servir às previews: basta acrescentar o callback do Supabase de preview como segundo redirect URI.
 
 ### Testes
 

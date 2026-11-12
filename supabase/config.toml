@@ -349,10 +349,10 @@ max_frequency = "5s"
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack_oidc`, `spotify`, `workos`, `zoom`.
-# GitHub OAuth. Para testar localmente, crie um OAuth App no GitHub com callback
-# http://127.0.0.1:54321/auth/v1/callback, troque enabled para true e exporte as variáveis.
+# GitHub OAuth. As credenciais vêm de supabase/.env (fora do git); veja o README.
+# Sem esse arquivo, o Supabase local sobe normalmente e só o login com GitHub falha.
 [auth.external.github]
-enabled = false
+enabled = true
 client_id = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET)"
 redirect_uri = ""
