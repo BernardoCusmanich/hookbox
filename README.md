@@ -117,6 +117,7 @@ Outros comandos: `npm run db:types` regenera `lib/supabase/types.ts` a partir do
    npx supabase db push
    ```
    Em **Authentication → URL Configuration**, defina o *Site URL* como `https://<seu-app>.vercel.app` e adicione `https://<seu-app>.vercel.app/auth/callback` às *Redirect URLs*. Em **Providers**, mantenha o e-mail com confirmação ligada e configure o GitHub, com o callback que o Supabase mostra.
+   Os e-mails de autenticação em português ficam em `supabase/templates` (o Supabase local já os usa). Para aplicá-los no projeto hospedado, rode `npm run email:templates -- <ref>` depois do `supabase login`.
 2. **Upstash:** crie um banco Redis e pegue o token e as signing keys do QStash no console.
 3. **Vercel:** importe o repositório e cadastre todas as variáveis do `.env.example` (sem `QSTASH_URL`). `APP_URL` precisa ser a URL pública final, porque é ela que o QStash chama e que o `/api/deliver` usa para conferir a assinatura.
 4. Faça o deploy. O build falha se faltar alguma variável.

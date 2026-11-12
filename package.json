@@ -12,7 +12,8 @@
     "test": "tsx --test tests/*.test.ts",
     "db:types": "supabase gen types typescript --local > lib/supabase/types.ts",
     "db:test": "supabase test db",
-    "qstash:dev": "qstash-cli dev"
+    "qstash:dev": "qstash-cli dev",
+    "email:templates": "tsx scripts/push-email-templates.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
