@@ -71,6 +71,7 @@ export function dbErrorMessage(error: { message: string; hint?: string | null; c
   switch (error.hint) {
     case "last_owner":
     case "endpoint_limit":
+    case "api_key_limit":
     case "demo":
     case "not_found":
     case "accepted":

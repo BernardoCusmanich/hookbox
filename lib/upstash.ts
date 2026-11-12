@@ -8,7 +8,7 @@ import { serverEnv } from "@/lib/env";
 let qstash: Client | undefined;
 let receiver: Receiver | undefined;
 let redis: Redis | undefined;
-let limiters: { slug: Ratelimit; ip: Ratelimit } | undefined;
+let limiters: { slug: Ratelimit; ip: Ratelimit; api: Ratelimit } | undefined;
 
 export function qstashClient(): Client {
   qstash ??= new Client({
@@ -61,7 +61,7 @@ export async function acquireAlertThrottle(endpointId: string, seconds: number):
   return result === "OK";
 }
 
-/** Sliding window: 60 req/min por slug e 120 req/min por IP. */
+/** Sliding window: 60 req/min por slug, 120 req/min por IP e 60 req/min por chave de API. */
 export function rateLimiters() {
   if (!limiters) {
     const client = redisClient();
@@ -75,6 +75,11 @@ export function rateLimiters() {
         redis: client,
         limiter: Ratelimit.slidingWindow(120, "1 m"),
         prefix: "hookbox:rl:ip",
+      }),
+      api: new Ratelimit({
+        redis: client,
+        limiter: Ratelimit.slidingWindow(60, "1 m"),
+        prefix: "hookbox:rl:api",
       }),
     };
   }

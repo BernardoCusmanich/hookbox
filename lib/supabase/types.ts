@@ -23,7 +23,27 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "deliveries": {
+            "api_keys": {
+                  Row: {
+                    "created_at": string,"created_by": string | null,"id": string,"key_hash": string,"last_used_at": string | null,"name": string,"org_id": string,"prefix": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"key_hash": string,"last_used_at"?: string | null,"name": string,"org_id": string,"prefix": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"key_hash"?: string,"last_used_at"?: string | null,"name"?: string,"org_id"?: string,"prefix"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "api_keys_org_id_fkey"
+      columns: ["org_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"deliveries": {
                   Row: {
                     "attempt": number,"created_at": string,"duration_ms": number | null,"error": string | null,"id": string,"org_id": string,"request_id": string,"status_code": number | null
                   }

@@ -6,8 +6,9 @@ import type { Database } from "@/lib/supabase/types";
 /**
  * Cliente com a service role: ignora o RLS.
  *
- * Usado SOMENTE em /in/[slug], /api/deliver, /api/cron/* e no seed
+ * Usado SOMENTE em /in/[slug], /api/deliver, /api/cron/*, /api/v1/* e no seed
  * (o seed roda com `--conditions=react-server`, por isso o `server-only` não quebra lá).
+ * Em /api/v1 toda consulta filtra pelo org_id da chave de API: esse filtro é a segurança.
  * Nunca importar em componente client nem em Server Action.
  */
 export function createAdminClient() {

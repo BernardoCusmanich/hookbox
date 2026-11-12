@@ -1,7 +1,7 @@
 -- Testes de RLS, RPCs e triggers. Rode com: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(68);
 
 -- Usuários de teste --------------------------------------------------------
 insert into auth.users (id, email, email_confirmed_at, raw_app_meta_data, aud, role) values
@@ -254,6 +254,92 @@ select throws_ok(
 select lives_ok(
   $$ update public.endpoints set transform_template = repeat('x', 10000) where slug = 'eeeeeeeeeee1' $$,
   'template de exatamente 10.000 caracteres é aceito'
+);
+select pg_temp.logout();
+
+-- Chaves de API --------------------------------------------------------------
+-- alice é owner da acme-acao; bob é membro; carol não pertence a nenhuma org.
+select pg_temp.logout();
+select set_config('test.acme_id', (select id::text from public.organizations where slug = 'acme-acao'), true);
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000a');
+select lives_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'CI', 'hbk_aaaaaaaa', repeat('a', 64), auth.uid()) $$,
+  'owner cria chave de API'
+);
+select is((select count(*)::int from public.api_keys), 1, 'owner lista a chave');
+select lives_ok($$ delete from public.api_keys where name = 'CI' $$, 'owner apaga a chave');
+select is((select count(*)::int from public.api_keys), 0, 'a chave apagada some da lista');
+insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+  values (current_setting('test.acme_id')::uuid, 'Backend', 'hbk_bbbbbbbb', repeat('b', 64), auth.uid());
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000b');
+select is((select count(*)::int from public.api_keys), 0, 'membro da mesma org não vê chaves');
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'Intruso', 'hbk_cccccccc', repeat('c', 64), auth.uid()) $$,
+  '42501', null, 'membro não cria chave'
+);
+delete from public.api_keys;
+select pg_temp.login('00000000-0000-0000-0000-00000000000a');
+select is((select count(*)::int from public.api_keys), 1, 'membro não apaga chaves');
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000c');
+select is((select count(*)::int from public.api_keys), 0, 'usuário de outra org não vê chaves');
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'Intruso', 'hbk_dddddddd', repeat('d', 64), auth.uid()) $$,
+  '42501', null, 'usuário de outra org não cria chave'
+);
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000a');
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'Falsa', 'hbk_eeeeeeee', repeat('e', 64),
+       '00000000-0000-0000-0000-00000000000b') $$,
+  '42501', null, 'created_by diferente de auth.uid() é negado'
+);
+select throws_ok(
+  $$ update public.api_keys set name = 'Renomeada' $$,
+  '42501', null, 'owner não atualiza chaves (sem update)'
+);
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'Hash ruim', 'hbk_ffffffff', 'nao-e-hex', auth.uid()) $$,
+  '23514', null, 'key_hash fora do formato é rejeitado'
+);
+
+-- Limite de 5 por organização.
+select lives_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     select current_setting('test.acme_id')::uuid, 'k' || g, 'hbk_' || lpad(g::text, 8, '0'),
+       lpad(g::text, 64, '0'), auth.uid()
+     from generate_series(1, 4) g $$,
+  'owner chega a 5 chaves'
+);
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     values (current_setting('test.acme_id')::uuid, 'k6', 'hbk_gggggggg', repeat('9', 64), auth.uid()) $$,
+  'P0001', 'Limite de 5 chaves de API por organização atingido.', 'sexta chave é barrada pelo trigger'
+);
+
+-- Conta demo (owner da org demo neste ponto do teste).
+select pg_temp.login('00000000-0000-0000-0000-00000000000d');
+select throws_ok(
+  $$ insert into public.api_keys (org_id, name, prefix, key_hash, created_by)
+     select id, 'Demo', 'hbk_hhhhhhhh', repeat('8', 64), auth.uid() from public.organizations where slug = 'demo' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não cria chave de API'
+);
+
+-- Service role (a API atualiza last_used_at).
+select pg_temp.service();
+select lives_ok(
+  $$ update public.api_keys set last_used_at = now() where name = 'Backend' $$,
+  'service role atualiza last_used_at'
+);
+select isnt(
+  (select last_used_at from public.api_keys where name = 'Backend'), null, 'last_used_at foi gravado'
 );
 select pg_temp.logout();
 

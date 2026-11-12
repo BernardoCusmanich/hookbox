@@ -16,6 +16,7 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 - **Encaminhamento com retry** pelo Upstash QStash (até 5 novas tentativas), com proteção contra SSRF e botão “Reenviar”.
 - **Transformação de payload** opcional por endpoint: um template JSON com `{{ body.campo }}`, `{{ headers.nome }}`, `{{ query.param }}` e `{{ method }}` gera o corpo encaminhado, com pré-visualização nas configurações.
 - **Alerta por e-mail** (SMTP; em produção, um Gmail do projeto) para os owners da organização quando uma entrega falha de vez: erro permanente, URL recusada ou as 5 novas tentativas esgotadas. No máximo um e-mail por endpoint por hora.
+- **API pública REST** (`/api/v1`) com chaves de API por organização, para listar endpoints e requisições, ver uma requisição e reenviá-la.
 - **“Copiar como cURL”** e **“Enviar teste”** direto do inspetor.
 - **Multi-tenant**: organizações, papéis (owner e membro), convites por link e seletor de organização, com o isolamento feito por RLS no Postgres.
 - **Segredos cifrados** com AES-256-GCM; `authorization`, `cookie`, `proxy-authorization` e `x-api-key` são gravados como `[redacted]`.
@@ -66,6 +67,128 @@ x-bridge-signature = "sha256=" + hex(HMAC-SHA256(segredo, "{x-bridge-timestamp}.
 4. Opcional: ligue o **encaminhamento** para repassar os eventos ao seu backend. Os headers `x-bridge-*` vão junto, então o destino pode validar a assinatura de novo.
 
 O Hookbox responde `200` em toda requisição gravada, então o bridge marca o evento como `sent`. Na demo, o endpoint “ERP via legacy-bridge (assinado)” já tem exemplos com assinatura válida, inválida, ausente e com timestamp vencido.
+
+## API pública
+
+A API REST v1 permite listar endpoints e requisições, ver uma requisição com o histórico de entregas e reenviá-la, sem abrir o painel.
+
+**Chave de API.** Em **Configurações → Chaves de API** (só owners), dê um nome e clique em **Criar chave**. A chave (`hbk_...`) aparece uma única vez; o Hookbox guarda só o prefixo e o hash SHA-256. Cada organização pode ter até 5 chaves, e excluir uma chave a revoga na hora. A criação não está disponível na demo pública.
+
+**Autenticação.** Envie a chave no header `Authorization: Bearer <chave>`. A chave dá acesso apenas aos dados da organização dela.
+
+**Limite.** 60 requisições por minuto por chave. Acima disso, a resposta é `429` com o header `Retry-After` (em segundos).
+
+**Formato das respostas.** Sucesso: `{ "data": ... }`. Erro: `{ "error": { "code": "...", "message": "..." } }`, com a mensagem em português.
+
+| Status | `code` | Quando |
+| --- | --- | --- |
+| 400 | `invalid_parameter` | `limit` ou `before` inválido |
+| 401 | `unauthorized` | chave ausente, malformada ou revogada |
+| 404 | `not_found` | o recurso não existe ou é de outra organização |
+| 409 | `forwarding_disabled` | reenvio de um endpoint sem encaminhamento ativo |
+| 429 | `rate_limited` | mais de 60 requisições por minuto |
+| 502 | `queue_error` | falha ao enfileirar o reenvio |
+
+Nos exemplos abaixo, `HOOKBOX_URL` é a URL do app (por exemplo, `https://hookbox-demo.vercel.app`) e `HOOKBOX_KEY` é a chave.
+
+### `GET /api/v1/endpoints`
+
+```bash
+curl -H "Authorization: Bearer $HOOKBOX_KEY" "$HOOKBOX_URL/api/v1/endpoints"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": "0b6f3c1e-1f2a-4d3b-9c4d-5e6f7a8b9c0d",
+      "name": "Pagamentos",
+      "slug": "abcdefghijkl",
+      "ingest_url": "https://hookbox-demo.vercel.app/in/abcdefghijkl",
+      "forward_enabled": true,
+      "forward_url": "https://api.suaempresa.com/webhooks",
+      "transform_enabled": false,
+      "created_at": "2026-11-12T10:00:00+00:00"
+    }
+  ]
+}
+```
+
+### `GET /api/v1/endpoints/{id}/requests`
+
+Lista as requisições do endpoint, da mais recente para a mais antiga. Parâmetros opcionais: `limit` (inteiro de 1 a 100, padrão 20) e `before` (timestamp ISO 8601; só traz requisições recebidas antes dele). Para a próxima página, passe o `next_cursor` como `before`. Quando não há mais páginas, `next_cursor` é `null`.
+
+```bash
+curl -H "Authorization: Bearer $HOOKBOX_KEY" \
+  "$HOOKBOX_URL/api/v1/endpoints/<id>/requests?limit=2"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": "2f1d6a52-9d2e-4c52-8a55-1d3b6f0e9a11",
+      "method": "POST",
+      "path": "/in/abcdefghijkl",
+      "query": { "loja": "sp" },
+      "content_type": "application/json",
+      "size_bytes": 73,
+      "signature_status": "valid",
+      "received_at": "2026-11-12T17:42:32.465086+00:00"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+```bash
+# próxima página
+curl -H "Authorization: Bearer $HOOKBOX_KEY" \
+  "$HOOKBOX_URL/api/v1/endpoints/<id>/requests?limit=2&before=2026-11-12T17:42:32.465086Z"
+```
+
+### `GET /api/v1/requests/{id}`
+
+```bash
+curl -H "Authorization: Bearer $HOOKBOX_KEY" "$HOOKBOX_URL/api/v1/requests/<id>"
+```
+
+```json
+{
+  "data": {
+    "id": "2f1d6a52-9d2e-4c52-8a55-1d3b6f0e9a11",
+    "endpoint_id": "0b6f3c1e-1f2a-4d3b-9c4d-5e6f7a8b9c0d",
+    "method": "POST",
+    "path": "/in/abcdefghijkl",
+    "query": {},
+    "headers": { "content-type": "application/json" },
+    "body": "{\"id\":42}",
+    "body_encoding": "utf8",
+    "content_type": "application/json",
+    "size_bytes": 9,
+    "ip": "203.0.113.7",
+    "signature_status": "valid",
+    "received_at": "2026-11-12T17:42:32.465086+00:00",
+    "deliveries": [
+      { "attempt": 1, "status_code": 200, "error": null, "duration_ms": 120, "created_at": "2026-11-12T17:42:33+00:00" }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/requests/{id}/resend`
+
+Enfileira um novo envio da requisição para o destino do endpoint. O resultado aparece nas `deliveries` da requisição.
+
+```bash
+curl -X POST -H "Authorization: Bearer $HOOKBOX_KEY" "$HOOKBOX_URL/api/v1/requests/<id>/resend"
+```
+
+```json
+{ "data": { "queued": true } }
+```
+
+Responde `202` quando enfileirou e `409` (`forwarding_disabled`) se o endpoint não tem encaminhamento ativo com uma URL.
 
 ## Rodando localmente
 
@@ -149,7 +272,7 @@ Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protectio
 
 ## Decisões técnicas
 
-**RLS como fronteira de multi-tenancy.** O isolamento entre organizações não depende de cada query lembrar de um `where org_id = ...`: ele está nas policies do Postgres, com `is_member(org)` e `is_owner(org)` (`security definer`, `stable`). O app usa a chave anon com a sessão do usuário em todo acesso a dados, e a service role só aparece em quatro lugares: a ingestão, o `/api/deliver`, o cron e o seed. Um bug numa Server Action resulta em “nenhuma linha”, não em vazamento. As actions ainda conferem a membership explicitamente, para dar mensagens de erro claras e como segunda camada. O Realtime herda as mesmas policies, então um usuário não consegue assinar as requisições de outra organização. As regras que o RLS não expressa bem viram triggers: o limite de 5 endpoints e o “sempre pelo menos um owner”. Tudo isso é coberto pelos testes pgTAP em `supabase/tests`.
+**RLS como fronteira de multi-tenancy.** O isolamento entre organizações não depende de cada query lembrar de um `where org_id = ...`: ele está nas policies do Postgres, com `is_member(org)` e `is_owner(org)` (`security definer`, `stable`). O app usa a chave anon com a sessão do usuário em todo acesso a dados, e a service role só aparece em cinco lugares: a ingestão, o `/api/deliver`, o cron, a API pública (`/api/v1`, onde toda consulta filtra pelo `org_id` da chave de API) e o seed. Um bug numa Server Action resulta em “nenhuma linha”, não em vazamento. As actions ainda conferem a membership explicitamente, para dar mensagens de erro claras e como segunda camada. O Realtime herda as mesmas policies, então um usuário não consegue assinar as requisições de outra organização. As regras que o RLS não expressa bem viram triggers: o limite de 5 endpoints e o “sempre pelo menos um owner”. Tudo isso é coberto pelos testes pgTAP em `supabase/tests`.
 
 **QStash em vez de worker próprio.** Na Vercel não existe processo de longa duração para consumir uma fila. O QStash guarda a mensagem, chama o `/api/deliver` e refaz a chamada com backoff quando a resposta é 5xx. A rota fica sem estado: verifica a assinatura do QStash, faz uma tentativa, grava o resultado em `deliveries` e devolve `500` para pedir retry (5xx, 408, 429, timeout, erro de rede) ou `200` para encerrar (2xx, 4xx, redirect). O número da tentativa vem do header `Upstash-Retried`. O custo é uma dependência externa; o ganho é não operar fila, worker nem cron de reprocessamento.
 
@@ -170,7 +293,3 @@ O template é percorrido como dados (sem `eval`), com limite de profundidade e d
 - A conta demo é compartilhada, então tem papel de *membro* (não mexe em membros, convites nem no nome da org), não cria organizações e não consegue trocar a própria senha ou o e-mail (um trigger em `auth.users` descarta a mudança). As travas também estão no banco (triggers da migration `demo_guards`), e só agem quando quem chama é a conta demo, então o seed e o cron passam. Na demo não dá para mudar o encaminhamento nem gerar ou remover o segredo. Revelar o segredo continua liberado, para testar a assinatura. Os endpoints de exemplo e a org não podem ser excluídos, e o cron restaura tudo por dia. O `/api/deliver` não envia nada para orgs demo: registra a entrega como "Encaminhamento desativado na demo.".
 - O Supabase Auth não separa um cadastro por senha de um por magic link. O cadastro por senha não aparece na interface, a confirmação de e-mail fica obrigatória e o aceite de convite exige e-mail confirmado. Assim, uma conta criada direto pela API com o e-mail de outra pessoa não consegue tomar um convite.
 - Corpos que não são UTF-8 válido (ou que contêm `\0`, que o Postgres não aceita em `text`) são gravados em base64 e reenviados com os bytes originais.
-
-## Roadmap
-
-- API pública para listar e reenviar requisições
