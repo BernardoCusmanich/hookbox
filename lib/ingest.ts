@@ -53,9 +53,14 @@ export function clientIp(headers: Headers): string | null {
   return real && isIP(real) ? real : null;
 }
 
+/**
+ * Query string em JSON. Parâmetros `x-vercel-*` (como o `x-vercel-protection-bypass`, usado para
+ * passar pela proteção das previews) são descartados, pela mesma regra dos headers.
+ */
 export function queryToJson(params: URLSearchParams): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const key of new Set(params.keys())) {
+    if (isInfrastructureHeader(key.toLowerCase())) continue;
     const values = params.getAll(key);
     out[key] = values.length === 1 ? values[0] : values;
   }

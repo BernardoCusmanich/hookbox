@@ -56,9 +56,23 @@ function parseClient(): ClientEnv {
   return parsed.data;
 }
 
+/**
+ * URL pública do app. Em produção e no local vem de `APP_URL`. Nas previews da Vercel,
+ * `APP_URL` não é definida e a URL estável da branch (`VERCEL_BRANCH_URL`) é usada.
+ */
+export function resolveAppUrl(): string | undefined {
+  if (process.env.APP_URL) return process.env.APP_URL;
+  if (process.env.VERCEL_ENV === "preview") {
+    const host = process.env.VERCEL_BRANCH_URL ?? process.env.VERCEL_URL;
+    if (host) return `https://${host}`;
+  }
+  return undefined;
+}
+
 function parseServer(): ServerEnv {
   const parsed = serverSchema.safeParse({
     ...process.env,
+    APP_URL: resolveAppUrl(),
     // A integração do Upstash na Vercel Marketplace cria KV_REST_API_*; aceita os dois nomes.
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN,

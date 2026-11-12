@@ -123,6 +123,17 @@ Outros comandos: `npm run db:types` regenera `lib/supabase/types.ts` a partir do
 5. Rode o seed apontando para produção, uma vez: `npm run seed` com as variáveis de produção num `.env.production.local`. Atenção: enquanto esse arquivo existir, ele tem prioridade sobre o `.env.local`, e o seed vai sempre para produção.
 6. O cron (`vercel.json`) roda todo dia às 03:00 UTC e chama `/api/cron/cleanup` com `Authorization: Bearer $CRON_SECRET`. A Vercel envia esse header sozinha quando a variável `CRON_SECRET` existe.
 
+### Previews
+
+As previews (branches e PRs) usam um **Supabase separado**, para nunca tocar no banco de produção:
+
+1. Crie um segundo projeto Supabase, aplique as migrations e rode o seed com as variáveis dele exportadas no shell. Elas têm prioridade sobre o `.env.production.local`.
+2. Em *Redirect URLs*, adicione `https://<projeto>-*-<time>.vercel.app/auth/callback`, que cobre as URLs de branch e de deploy.
+3. Na Vercel, cadastre no ambiente **Preview** as variáveis do Supabase de preview, além de `ENCRYPTION_KEY`, `CRON_SECRET`, `DEMO_EMAIL` e `DEMO_PASSWORD` próprias. **Não** defina `APP_URL`: nas previews ela vem de `VERCEL_BRANCH_URL`. QStash e Redis podem ser compartilhados.
+4. Em **Settings → Deployment Protection**, ligue o *Protection Bypass for Automation*. A Vercel passa a expor `VERCEL_AUTOMATION_BYPASS_SECRET`, e o app manda esse valor no header `x-vercel-protection-bypass` das mensagens do QStash, para o `/api/deliver` passar pela proteção.
+
+Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protection-bypass=<segredo>` à URL de ingestão. Parâmetros `x-vercel-*` são descartados antes de gravar, então o segredo não aparece no inspetor.
+
 ## Decisões técnicas
 
 **RLS como fronteira de multi-tenancy.** O isolamento entre organizações não depende de cada query lembrar de um `where org_id = ...`: ele está nas policies do Postgres, com `is_member(org)` e `is_owner(org)` (`security definer`, `stable`). O app usa a chave anon com a sessão do usuário em todo acesso a dados, e a service role só aparece em quatro lugares: a ingestão, o `/api/deliver`, o cron e o seed. Um bug numa Server Action resulta em “nenhuma linha”, não em vazamento. As actions ainda conferem a membership explicitamente, para dar mensagens de erro claras e como segunda camada. O Realtime herda as mesmas policies, então um usuário não consegue assinar as requisições de outra organização. As regras que o RLS não expressa bem viram triggers: o limite de 5 endpoints e o “sempre pelo menos um owner”. Tudo isso é coberto pelos testes pgTAP em `supabase/tests`.

@@ -124,6 +124,11 @@ describe("ingestão", () => {
   it("query com chaves repetidas", () => {
     assert.deepEqual(queryToJson(new URLSearchParams("a=1&b=2&a=3")), { a: ["1", "3"], b: "2" });
   });
+
+  it("descarta parâmetros x-vercel-* da query (bypass da proteção das previews)", () => {
+    const params = new URLSearchParams("x-vercel-protection-bypass=s3gredo&X-Vercel-Set-Bypass-Cookie=true&id=7");
+    assert.deepEqual(queryToJson(params), { id: "7" });
+  });
 });
 
 describe("encaminhamento", () => {

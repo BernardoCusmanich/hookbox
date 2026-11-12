@@ -30,7 +30,19 @@ export async function enqueueDelivery(requestId: string): Promise<void> {
     url: `${serverEnv.APP_URL}/api/deliver`,
     body: { requestId },
     retries: 5,
+    headers: protectionBypassHeaders(),
   });
+}
+
+/**
+ * As previews da Vercel ficam atrás do Deployment Protection. Com o "Protection Bypass for
+ * Automation" ligado, a Vercel expõe VERCEL_AUTOMATION_BYPASS_SECRET, e o QStash repassa este
+ * header para o /api/deliver. Em produção (sem proteção) nada é enviado.
+ */
+export function protectionBypassHeaders(): Record<string, string> | undefined {
+  const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (process.env.VERCEL_ENV !== "preview" || !secret) return undefined;
+  return { "x-vercel-protection-bypass": secret };
 }
 
 /** Sliding window: 60 req/min por slug e 120 req/min por IP. */

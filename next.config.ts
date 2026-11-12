@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
-import { validateEnv } from "./lib/env";
+import { resolveAppUrl, validateEnv } from "./lib/env";
 
 // Falta de variável de ambiente quebra o build (e o `next dev`).
 validateEnv();
 
 const isDev = process.env.NODE_ENV !== "production";
 // HTTPS só quando o app é servido em https (na Vercel). Local com `next start` fica em http.
-const isHttps = process.env.APP_URL?.startsWith("https://") ?? false;
+const isHttps = resolveAppUrl()?.startsWith("https://") ?? false;
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!);
 const supabaseWs = `${supabaseUrl.protocol === "https:" ? "wss:" : "ws:"}//${supabaseUrl.host}`;
 
