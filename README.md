@@ -24,6 +24,10 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 - **Limpeza diária** (Vercel Cron): apaga requisições com mais de 7 dias e restaura a organização demo.
 - Login por magic link ou GitHub, modo claro e escuro, layout responsivo e interface em português.
 
+Transformação de payload: o template é escrito nas configurações do endpoint e pré-visualizado com a última requisição recebida.
+
+![Template de transformação sendo escrito nas configurações do endpoint e a pré-visualização gerando o JSON a partir do último pedido recebido](public/transform.gif)
+
 ## Fluxo
 
 ```mermaid
