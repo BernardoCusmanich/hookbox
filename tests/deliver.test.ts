@@ -19,9 +19,10 @@ function loaded(overrides: Partial<LoadedRequest> = {}): LoadedRequest {
     org_id: ORG_ID,
     method: "POST",
     headers: { "content-type": "application/json", host: "hookbox.test" },
+    query: {},
     body: '{"a":1}',
     body_encoding: "utf8",
-    endpoints: { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: true },
+    endpoints: { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: true, transform_template: null },
     organizations: { slug: "acme", is_demo: false },
     ...overrides,
   };
@@ -156,7 +157,7 @@ describe("handleDelivery", () => {
   });
 
   it("encaminhamento desligado: 200 sem gravar nem enviar", async () => {
-    const endpoints = { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: false };
+    const endpoints = { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: false, transform_template: null };
     const { calls, deps } = setup({ loadResult: { data: loaded({ endpoints }), error: null } });
     const res = await handleDelivery(input(), deps);
     assert.deepEqual(res, {
@@ -305,7 +306,7 @@ describe("handleDelivery", () => {
       const demo = setup({ loadResult: { data: loaded({ organizations: { slug: "demo", is_demo: true } }), error: null } });
       await handleDelivery(input(), demo.deps);
       const off = setup({
-        loadResult: { data: loaded({ endpoints: { ...ENDPOINT, forward_url: null, forward_enabled: false } }), error: null },
+        loadResult: { data: loaded({ endpoints: { ...ENDPOINT, forward_url: null, forward_enabled: false, transform_template: null } }), error: null },
       });
       await handleDelivery(input(), off.deps);
       assert.equal(demo.calls.alerts.length + off.calls.alerts.length, 0);
@@ -316,6 +317,96 @@ describe("handleDelivery", () => {
       const res = await handleDelivery(input({ retried: String(MAX_RETRIES) }), deps);
       assert.deepEqual(res, { status: 200, body: { ok: true, message: "retries esgotados" } });
       assert.equal(calls.alerts.length, 1);
+    });
+  });
+
+  describe("transformação de payload", () => {
+    const withTemplate = (transform_template: string | null, over: Partial<LoadedRequest> = {}) =>
+      loaded({
+        endpoints: { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: true, transform_template },
+        headers: { "content-type": "text/plain", "content-encoding": "gzip", "x-github-event": "push", host: "hookbox.test" },
+        query: { id: "42" },
+        body: '{"id":7,"status":"pago"}',
+        ...over,
+      });
+
+    it("aplica o template: envia o JSON gerado com content-type application/json", async () => {
+      const template = '{"text":"Pedido {{ body.id }}: {{ body.status }}","evento":"{{ headers.x-github-event }}","q":"{{ query.id }}"}';
+      const { calls, deps } = setup({ loadResult: { data: withTemplate(template), error: null } });
+      const res = await handleDelivery(input(), deps);
+      assert.deepEqual(res, { status: 200, body: { ok: true, message: "success" } });
+      assert.equal(calls.sends.length, 1);
+      assert.equal(calls.sends[0].body, '{"text":"Pedido 7: pago","evento":"push","q":"42"}');
+      assert.equal(calls.sends[0].bodyEncoding, "utf8");
+      assert.equal(calls.sends[0].headers["content-type"], "application/json");
+      assert.equal(calls.sends[0].headers["content-encoding"], undefined);
+      assert.equal(calls.sends[0].headers["x-github-event"], "push");
+      assert.equal(calls.sends[0].headers["x-hookbox-request-id"], REQUEST_ID);
+      assert.equal(calls.records[0].status_code, 200);
+      assert.equal(calls.alerts.length, 0);
+    });
+
+    it("corpo base64 vira utf8 com o resultado do template", async () => {
+      const { calls, deps } = setup({
+        loadResult: { data: withTemplate('{"b":"{{ body }}","m":"{{ method }}"}', { body: "AAEC", body_encoding: "base64" }), error: null },
+      });
+      await handleDelivery(input(), deps);
+      assert.equal(calls.sends[0].body, '{"b":null,"m":"POST"}');
+      assert.equal(calls.sends[0].bodyEncoding, "utf8");
+    });
+
+    it("template com erro: grava, alerta e não envia", async () => {
+      // Resultado acima de 256 KB: só falha na hora de aplicar (o template em si é válido).
+      const big = JSON.stringify({ big: "x".repeat(200 * 1024) });
+      const { calls, deps } = setup({
+        loadResult: {
+          data: withTemplate('{"a":"{{ body.big }}","b":"{{ body.big }}"}', { body: big, body_encoding: "utf8" }),
+          error: null,
+        },
+      });
+      const res = await handleDelivery(input(), deps);
+      assert.deepEqual(res, { status: 200, body: { ok: true, message: "transformação falhou" } });
+      assert.equal(calls.sends.length, 0);
+      assert.deepEqual(calls.records, [
+        {
+          request_id: REQUEST_ID,
+          org_id: ORG_ID,
+          attempt: 1,
+          status_code: null,
+          error: "Transformação: O resultado da transformação passa de 256 KB.",
+          duration_ms: null,
+        },
+      ]);
+      assert.equal(calls.alerts.length, 1);
+      assert.equal(calls.alerts[0].statusCode, null);
+      assert.equal(calls.alerts[0].error, "Transformação: O resultado da transformação passa de 256 KB.");
+    });
+
+    it("template inválido salvo no banco também falha sem enviar", async () => {
+      const { calls, deps } = setup({ loadResult: { data: withTemplate("{ quebrado"), error: null } });
+      const res = await handleDelivery(input({ retried: "1" }), deps);
+      assert.equal(res.body.message, "transformação falhou");
+      assert.equal(calls.sends.length, 0);
+      assert.equal(calls.records[0].error, "Transformação: O template não é um JSON válido.");
+      assert.equal(calls.records[0].attempt, 2);
+      assert.equal(calls.alerts.length, 1);
+    });
+
+    it("sem template (null ou vazio) mantém o corpo e os headers originais", async () => {
+      for (const template of [null, ""]) {
+        const { calls, deps } = setup({ loadResult: { data: withTemplate(template), error: null } });
+        await handleDelivery(input(), deps);
+        assert.equal(calls.sends[0].body, '{"id":7,"status":"pago"}');
+        assert.equal(calls.sends[0].headers["content-type"], "text/plain");
+        assert.equal(calls.sends[0].headers["content-encoding"], "gzip");
+      }
+    });
+
+    it("org demo não transforma nem envia", async () => {
+      const data = withTemplate('{"a":1}', { organizations: { slug: "demo", is_demo: true } });
+      const { calls, deps } = setup({ loadResult: { data, error: null } });
+      await handleDelivery(input(), deps);
+      assert.equal(calls.sends.length, 0);
     });
   });
 });

@@ -4,6 +4,7 @@ export type EndpointInfo = {
   slug: string;
   forwardUrl: string | null;
   forwardEnabled: boolean;
+  transformTemplate: string | null;
   hasSecret: boolean;
 };
 

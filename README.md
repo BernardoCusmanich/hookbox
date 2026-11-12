@@ -14,6 +14,7 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 - **Inspetor em tempo real** via Supabase Realtime: método, horário, tamanho e selo da assinatura de cada requisição; corpo com JSON formatado, headers, query e histórico de entregas.
 - **Verificação de assinatura HMAC-SHA256** compatível com o [legacy-bridge](https://github.com/BernardoCusmanich/legacy-bridge), com janela de ±5 minutos para o timestamp. O status é informativo: a requisição é gravada mesmo com assinatura inválida.
 - **Encaminhamento com retry** pelo Upstash QStash (até 5 novas tentativas), com proteção contra SSRF e botão “Reenviar”.
+- **Transformação de payload** opcional por endpoint: um template JSON com `{{ body.campo }}`, `{{ headers.nome }}`, `{{ query.param }}` e `{{ method }}` gera o corpo encaminhado, com pré-visualização nas configurações.
 - **Alerta por e-mail** (SMTP; em produção, um Gmail do projeto) para os owners da organização quando uma entrega falha de vez: erro permanente, URL recusada ou as 5 novas tentativas esgotadas. No máximo um e-mail por endpoint por hora.
 - **“Copiar como cURL”** e **“Enviar teste”** direto do inspetor.
 - **Multi-tenant**: organizações, papéis (owner e membro), convites por link e seletor de organização, com o isolamento feito por RLS no Postgres.
@@ -156,6 +157,14 @@ Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protectio
 
 **Proteção contra SSRF.** Encaminhar para uma URL escolhida pelo usuário é um convite para alcançar a rede interna, como o metadata da cloud em `169.254.169.254`. A URL é validada ao salvar e de novo antes de cada envio: só `https`, sem usuário e senha na URL, sem o próprio domínio do Hookbox, e nenhum dos IPs resolvidos (`dns.lookup` com `all: true`) pode ser loopback, privado, link-local, CGNAT, multicast, reservado ou IPv4 embutido em IPv6. Validar só antes do fetch abre espaço para DNS rebinding (o domínio resolve para um IP público na checagem e para um interno na conexão). Por isso o envio usa um `undici.Agent` com um `lookup` próprio, que confere o IP no momento em que o socket conecta, e IP literal é checado à parte. Redirects não são seguidos (`redirect: 'manual'`) e contam como falha permanente, e cada tentativa tem timeout de 10 s. Para evitar loops (um endpoint encaminhando para outro, inclusive por uma URL alternativa do mesmo deploy), uma requisição que chega com `x-hookbox-request-id` é gravada, mas não é reencaminhada.
 
+**Transformação de payload.** Cada endpoint pode ter um template JSON (até 10.000 caracteres). Só os valores string são processados: `"{{ body.order.id }}"` sozinho mantém o tipo original (número, objeto, array, `null` se ausente) e, dentro de um texto maior, vira string. Os caminhos começam em `body`, `headers` (minúsculas), `query` ou `method` e aceitam `.chave` e `[índice]`. Por exemplo, para transformar um evento num payload de Slack:
+
+```json
+{"text": "Pedido {{ body.id }}: {{ body.status }}"}
+```
+
+O template é percorrido como dados (sem `eval`), com limite de profundidade e de 256 KB na saída. O `/api/deliver` envia o resultado como `application/json`; se o template falhar, a entrega é gravada com o erro e os owners recebem o alerta. Sem template, o corpo original é encaminhado como antes. Na demo o campo fica desabilitado, mas a pré-visualização funciona.
+
 **Outras escolhas.**
 - `proxy.ts` (o antigo `middleware.ts` do Next.js 16) renova a sessão, protege `/app/**` e manda para o onboarding quem ainda não tem organização.
 - A conta demo é compartilhada, então tem papel de *membro* (não mexe em membros, convites nem no nome da org), não cria organizações e não consegue trocar a própria senha ou o e-mail (um trigger em `auth.users` descarta a mudança). As travas também estão no banco (triggers da migration `demo_guards`), e só agem quando quem chama é a conta demo, então o seed e o cron passam. Na demo não dá para mudar o encaminhamento nem gerar ou remover o segredo. Revelar o segredo continua liberado, para testar a assinatura. Os endpoints de exemplo e a org não podem ser excluídos, e o cron restaura tudo por dia. O `/api/deliver` não envia nada para orgs demo: registra a entrega como "Encaminhamento desativado na demo.".
@@ -164,5 +173,4 @@ Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protectio
 
 ## Roadmap
 
-- Transformação de payload antes do encaminhamento
 - API pública para listar e reenviar requisições

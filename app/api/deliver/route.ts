@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       const { data, error } = await createAdminClient()
         .from("requests")
         .select(
-          "id, org_id, method, headers, body, body_encoding, endpoints ( id, name, forward_url, forward_enabled ), organizations ( slug, is_demo )",
+          "id, org_id, method, headers, query, body, body_encoding, endpoints ( id, name, forward_url, forward_enabled, transform_template ), organizations ( slug, is_demo )",
         )
         .eq("id", requestId)
         .maybeSingle();

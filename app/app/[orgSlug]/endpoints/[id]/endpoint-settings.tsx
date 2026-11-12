@@ -20,8 +20,10 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   deleteEndpoint,
+  previewTransform,
   regenerateSecret,
   removeSecret,
   revealSecret,
@@ -48,8 +50,11 @@ export function EndpointSettings({
   const [name, setName] = useState(endpoint.name);
   const [forwardUrl, setForwardUrl] = useState(endpoint.forwardUrl ?? "");
   const [forwardEnabled, setForwardEnabled] = useState(endpoint.forwardEnabled);
+  const [transformTemplate, setTransformTemplate] = useState(endpoint.transformTemplate ?? "");
+  const [preview, setPreview] = useState<{ ok: boolean; text: string } | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
+  const [previewing, startPreview] = useTransition();
   const [secretPending, startSecret] = useTransition();
   const [deleting, startDelete] = useTransition();
 
@@ -62,10 +67,23 @@ export function EndpointSettings({
   function save(e: { preventDefault(): void }) {
     e.preventDefault();
     startSave(async () => {
-      const result = await updateEndpoint({ endpointId: endpoint.id, name, forwardUrl, forwardEnabled });
+      const result = await updateEndpoint({
+        endpointId: endpoint.id,
+        name,
+        forwardUrl,
+        forwardEnabled,
+        transformTemplate,
+      });
       if (!result.ok) return void toast.error(result.error);
       toast.success("Configurações salvas.");
       router.refresh();
+    });
+  }
+
+  function runPreview() {
+    startPreview(async () => {
+      const result = await previewTransform({ endpointId: endpoint.id, template: transformTemplate });
+      setPreview(result.ok ? { ok: true, text: result.data.output } : { ok: false, text: result.error });
     });
   }
 
@@ -112,7 +130,7 @@ export function EndpointSettings({
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Configurações do endpoint</SheetTitle>
-          <SheetDescription>Nome, segredo de assinatura e encaminhamento.</SheetDescription>
+          <SheetDescription>Nome, segredo de assinatura, encaminhamento e transformação.</SheetDescription>
         </SheetHeader>
 
         <div className="flex flex-col gap-6 px-4 pb-6">
@@ -151,6 +169,47 @@ export function EndpointSettings({
                 Só https e endereços públicos. IPs internos, de rede privada e de metadata da cloud são recusados.
               </p>
               {isDemo && <p className="text-xs text-muted-foreground">Indisponível na demo pública</p>}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ep-transform">Transformação (opcional)</Label>
+              <Textarea
+                id="ep-transform"
+                className="min-h-24 font-mono text-xs"
+                placeholder={'{\n  "text": "Pedido {{ body.id }}: {{ body.status }}"\n}'}
+                value={transformTemplate}
+                maxLength={10000}
+                spellCheck={false}
+                onChange={(e) => setTransformTemplate(e.target.value)}
+                disabled={isDemo}
+              />
+              <p className="text-xs text-muted-foreground">
+                Template JSON. Use {"{{ body.campo }}"}, {"{{ headers.nome }}"}, {"{{ query.param }}"} ou{" "}
+                {"{{ method }}"}. Vazio = encaminha o corpo original.
+              </p>
+              {isDemo && <p className="text-xs text-muted-foreground">Indisponível na demo pública</p>}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={runPreview}
+                disabled={previewing}
+              >
+                {previewing ? "Gerando..." : "Pré-visualizar"}
+              </Button>
+              {preview && (
+                <pre
+                  className={
+                    preview.ok
+                      ? "max-h-60 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs"
+                      : "max-h-60 overflow-auto whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 p-2 font-mono text-xs text-destructive"
+                  }
+                  role={preview.ok ? undefined : "alert"}
+                >
+                  {preview.text}
+                </pre>
+              )}
             </div>
 
             <Button type="submit" disabled={saving} className="self-start">

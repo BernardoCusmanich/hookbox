@@ -1,7 +1,7 @@
 -- Testes de RLS, RPCs e triggers. Rode com: npx supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(45);
+select plan(51);
 
 -- Usuários de teste --------------------------------------------------------
 insert into auth.users (id, email, email_confirmed_at, raw_app_meta_data, aud, role) values
@@ -183,9 +183,18 @@ select throws_ok(
   'P0001', 'Indisponível na demo pública.', 'demo não muda o segredo'
 );
 select throws_ok(
+  $$ update public.endpoints set transform_template = '{"a":1}' where slug = 'demopedidos1' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não muda o template de transformação'
+);
+select throws_ok(
   $$ insert into public.endpoints (org_id, name, slug, forward_url)
      select id, 'Com forward', 'demoforward1', 'https://example.com/hook' from public.organizations where slug = 'demo' $$,
   'P0001', 'Indisponível na demo pública.', 'demo não cria endpoint com forward_url'
+);
+select throws_ok(
+  $$ insert into public.endpoints (org_id, name, slug, transform_template)
+     select id, 'Com template', 'demotemplat1', '{"a":1}' from public.organizations where slug = 'demo' $$,
+  'P0001', 'Indisponível na demo pública.', 'demo não cria endpoint com transform_template'
 );
 select lives_ok(
   $$ insert into public.endpoints (org_id, name, slug)
@@ -225,6 +234,26 @@ select lives_ok(
 select lives_ok(
   $$ delete from public.endpoints where slug = 'demobridge01' $$,
   'service role apaga endpoint de exemplo'
+);
+select pg_temp.logout();
+
+-- Template de transformação (usuário normal) --------------------------------
+select pg_temp.login('00000000-0000-0000-0000-00000000000a');
+select lives_ok(
+  $$ update public.endpoints set transform_template = '{"text":"{{ body.id }}"}' where slug = 'eeeeeeeeeee1' $$,
+  'owner define o template de transformação'
+);
+select is(
+  (select transform_template from public.endpoints where slug = 'eeeeeeeeeee1'),
+  '{"text":"{{ body.id }}"}', 'o template foi gravado'
+);
+select throws_ok(
+  $$ update public.endpoints set transform_template = repeat('x', 10001) where slug = 'eeeeeeeeeee1' $$,
+  '23514', null, 'template acima de 10.000 caracteres é rejeitado'
+);
+select lives_ok(
+  $$ update public.endpoints set transform_template = repeat('x', 10000) where slug = 'eeeeeeeeeee1' $$,
+  'template de exatamente 10.000 caracteres é aceito'
 );
 select pg_temp.logout();
 

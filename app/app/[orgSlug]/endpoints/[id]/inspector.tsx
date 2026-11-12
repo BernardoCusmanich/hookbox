@@ -219,7 +219,7 @@ export function Inspector({
 
       <EndpointSettings
         // Remonta quando o endpoint muda (após salvar), recarregando o formulário.
-        key={`${endpoint.name}|${endpoint.forwardUrl}|${endpoint.forwardEnabled}|${endpoint.hasSecret}`}
+        key={`${endpoint.name}|${endpoint.forwardUrl}|${endpoint.forwardEnabled}|${endpoint.transformTemplate}|${endpoint.hasSecret}`}
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         endpoint={endpoint}

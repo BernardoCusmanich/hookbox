@@ -51,14 +51,14 @@ isOneToOne: false
                   ]
                 },"endpoints": {
                   Row: {
-                    "created_at": string,"forward_enabled": boolean,"forward_url": string | null,"id": string,"name": string,"org_id": string,"secret_ciphertext": string | null,"slug": string
+                    "created_at": string,"forward_enabled": boolean,"forward_url": string | null,"id": string,"name": string,"org_id": string,"secret_ciphertext": string | null,"slug": string,"transform_template": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"forward_enabled"?: boolean,"forward_url"?: string | null,"id"?: string,"name": string,"org_id": string,"secret_ciphertext"?: string | null,"slug": string
+                    "created_at"?: string,"forward_enabled"?: boolean,"forward_url"?: string | null,"id"?: string,"name": string,"org_id": string,"secret_ciphertext"?: string | null,"slug": string,"transform_template"?: string | null
                   }
                   Update: {
-                    "created_at"?: string,"forward_enabled"?: boolean,"forward_url"?: string | null,"id"?: string,"name"?: string,"org_id"?: string,"secret_ciphertext"?: string | null,"slug"?: string
+                    "created_at"?: string,"forward_enabled"?: boolean,"forward_url"?: string | null,"id"?: string,"name"?: string,"org_id"?: string,"secret_ciphertext"?: string | null,"slug"?: string,"transform_template"?: string | null
                   }
                   Relationships: [
                     {

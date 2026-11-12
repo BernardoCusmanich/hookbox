@@ -15,7 +15,7 @@ export default async function EndpointPage({ params }: PageProps<"/app/[orgSlug]
 
   const { data: endpoint } = await supabase
     .from("endpoints")
-    .select("id, name, slug, forward_url, forward_enabled, secret_ciphertext")
+    .select("id, name, slug, forward_url, forward_enabled, transform_template, secret_ciphertext")
     .eq("id", id)
     .eq("org_id", org.id)
     .maybeSingle();
@@ -39,6 +39,7 @@ export default async function EndpointPage({ params }: PageProps<"/app/[orgSlug]
         slug: endpoint.slug,
         forwardUrl: endpoint.forward_url,
         forwardEnabled: endpoint.forward_enabled,
+        transformTemplate: endpoint.transform_template,
         // O ciphertext nunca vai para o navegador; só se existe ou não.
         hasSecret: Boolean(endpoint.secret_ciphertext),
       }}

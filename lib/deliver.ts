@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { FailureInfo } from "@/lib/alerts";
 import { buildForwardHeaders, type sendForward } from "@/lib/forward";
 import { ForwardUrlError } from "@/lib/ssrf";
+import { applyTransform, buildTransformContext, TransformError } from "@/lib/transform";
 
 /**
  * Lógica do /api/deliver (worker do QStash), sem dependências de servidor
@@ -16,9 +17,16 @@ export type LoadedRequest = {
   org_id: string;
   method: string;
   headers: unknown;
+  query: unknown;
   body: string | null;
   body_encoding: string;
-  endpoints: { id: string; name: string; forward_url: string | null; forward_enabled: boolean } | null;
+  endpoints: {
+    id: string;
+    name: string;
+    forward_url: string | null;
+    forward_enabled: boolean;
+    transform_template: string | null;
+  } | null;
   organizations: { slug: string; is_demo: boolean } | null;
 };
 
@@ -137,13 +145,28 @@ export async function handleDelivery(
     return done("url recusada");
   }
 
-  const outcome = await deps.sendForward({
-    url,
-    method: req.method,
-    headers: buildForwardHeaders((req.headers ?? {}) as Record<string, unknown>, req.id),
-    body: req.body,
-    bodyEncoding: req.body_encoding,
-  });
+  let headers = buildForwardHeaders((req.headers ?? {}) as Record<string, unknown>, req.id);
+  let body = req.body;
+  let bodyEncoding = req.body_encoding;
+
+  // Transformação opcional: o corpo encaminhado passa a ser o JSON gerado pelo template.
+  if (endpoint.transform_template) {
+    try {
+      body = applyTransform(endpoint.transform_template, buildTransformContext(req));
+    } catch (err) {
+      if (!(err instanceof TransformError)) throw err;
+      const message = `Transformação: ${err.message}`;
+      await record(req, null, message, null);
+      await failedForGood(req, null, message);
+      return done("transformação falhou");
+    }
+    bodyEncoding = "utf8";
+    // O corpo mudou: o content-encoding original não vale mais.
+    delete headers["content-encoding"];
+    headers = { ...headers, "content-type": "application/json" };
+  }
+
+  const outcome = await deps.sendForward({ url, method: req.method, headers, body, bodyEncoding });
 
   await record(req, outcome.statusCode, outcome.kind === "success" ? null : outcome.error, outcome.durationMs);
 

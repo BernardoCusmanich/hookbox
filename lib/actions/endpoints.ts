@@ -6,6 +6,7 @@ import { decryptSecret, encryptSecret, generateEndpointSecret, generateEndpointS
 import { DEMO_ENDPOINT_SLUGS } from "@/lib/demo-constants";
 import { serverEnv } from "@/lib/env";
 import { ForwardUrlError, validateForwardUrl } from "@/lib/ssrf";
+import { applyTransform, buildTransformContext, TransformError, validateTemplate } from "@/lib/transform";
 import { enqueueDelivery } from "@/lib/upstash";
 import { ActionError, action, assertMember, dbErrorMessage, ok, uuid } from "@/lib/actions/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -64,9 +65,14 @@ export const updateEndpoint = action(
     name: endpointName,
     forwardUrl: z.string().trim().max(2048, { message: "URL longa demais." }),
     forwardEnabled: z.boolean(),
+    transformTemplate: z.string().trim().max(10000, { message: "O template pode ter no máximo 10.000 caracteres." }),
   }),
-  async ({ endpointId, name, forwardUrl, forwardEnabled }, { supabase, user }) => {
+  async ({ endpointId, name, forwardUrl, forwardEnabled, transformTemplate }, { supabase, user }) => {
     await loadEndpoint(supabase, user.id, endpointId);
+    if (transformTemplate) {
+      const templateError = validateTemplate(transformTemplate);
+      if (templateError) throw new ActionError(templateError);
+    }
     if (forwardEnabled && !forwardUrl) {
       throw new ActionError("Informe a URL de encaminhamento para ativá-lo.");
     }
@@ -82,11 +88,44 @@ export const updateEndpoint = action(
     }
     const { error } = await supabase
       .from("endpoints")
-      .update({ name, forward_url: forwardUrl || null, forward_enabled: forwardEnabled })
+      .update({
+        name,
+        forward_url: forwardUrl || null,
+        forward_enabled: forwardEnabled,
+        transform_template: transformTemplate || null,
+      })
       .eq("id", endpointId);
     if (error) throw new ActionError(dbErrorMessage(error));
     revalidatePath("/app", "layout");
     return ok();
+  },
+);
+
+/** Pré-visualiza o template contra a requisição mais recente do endpoint (só leitura). */
+export const previewTransform = action(
+  z.object({
+    endpointId: uuid,
+    template: z.string().max(10000, { message: "O template pode ter no máximo 10.000 caracteres." }),
+  }),
+  async ({ endpointId, template }, { supabase, user }) => {
+    await loadEndpoint(supabase, user.id, endpointId);
+    const templateError = validateTemplate(template);
+    if (templateError) throw new ActionError(templateError);
+    const { data: req } = await supabase
+      .from("requests")
+      .select("method, headers, query, body, body_encoding")
+      .eq("endpoint_id", endpointId)
+      .order("received_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!req) throw new ActionError("Envie uma requisição para este endpoint para pré-visualizar.");
+    try {
+      const output = applyTransform(template, buildTransformContext(req));
+      return ok({ output: JSON.stringify(JSON.parse(output), null, 2) });
+    } catch (err) {
+      if (err instanceof TransformError) throw new ActionError(err.message);
+      throw err;
+    }
   },
 );
 
