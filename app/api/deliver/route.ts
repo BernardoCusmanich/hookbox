@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { sendFailureAlert } from "@/lib/alerts";
 import { handleDelivery, type DeliveryDeps } from "@/lib/deliver";
 import { serverEnv } from "@/lib/env";
 import { sendForward } from "@/lib/forward";
 import { validateForwardUrl } from "@/lib/ssrf";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { qstashReceiver } from "@/lib/upstash";
+import { sendEmail } from "@/lib/email";
+import { acquireAlertThrottle, qstashReceiver } from "@/lib/upstash";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
       const { data, error } = await createAdminClient()
         .from("requests")
         .select(
-          "id, org_id, method, headers, body, body_encoding, endpoints ( forward_url, forward_enabled ), organizations ( is_demo )",
+          "id, org_id, method, headers, body, body_encoding, endpoints ( id, name, forward_url, forward_enabled ), organizations ( slug, is_demo )",
         )
         .eq("id", requestId)
         .maybeSingle();
@@ -45,6 +47,16 @@ export async function POST(request: NextRequest) {
         requireHttps: process.env.NODE_ENV === "production",
       }),
     sendForward,
+    async notifyFailure(info) {
+      const result = await sendFailureAlert(info, {
+        appUrl: serverEnv.APP_URL,
+        enabled: Boolean(serverEnv.RESEND_API_KEY),
+        ownerEmails,
+        acquireThrottle: acquireAlertThrottle,
+        sendEmail,
+      });
+      console.info("[deliver] alerta de falha:", result);
+    },
   };
 
   const { status, body } = await handleDelivery(
@@ -56,4 +68,13 @@ export async function POST(request: NextRequest) {
     deps,
   );
   return NextResponse.json(body, { status });
+}
+
+/** E-mails dos owners da organização (auth.users só é acessível pela service role). */
+async function ownerEmails(orgId: string): Promise<string[]> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("memberships").select("user_id").eq("org_id", orgId).eq("role", "owner");
+  if (error) throw new Error(`falha ao listar owners (${error.code})`);
+  const users = await Promise.all((data ?? []).map((m) => admin.auth.admin.getUserById(m.user_id)));
+  return users.flatMap(({ data: u }) => (u.user?.email ? [u.user.email] : []));
 }

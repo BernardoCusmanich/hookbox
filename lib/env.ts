@@ -36,6 +36,16 @@ const serverSchema = z.object({
   CRON_SECRET: z.string().min(16),
   DEMO_EMAIL: z.email(),
   DEMO_PASSWORD: z.string().min(8),
+  /** Opcional: sem ela, os alertas de falha de entrega não são enviados. */
+  RESEND_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  /** Remetente dos alertas, de um domínio verificado no Resend. O padrão do Resend só entrega para o dono da conta. */
+  ALERT_EMAIL_FROM: z
+    .string()
+    .optional()
+    .transform((v) => v || "Hookbox <onboarding@resend.dev>"),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

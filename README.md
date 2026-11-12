@@ -14,6 +14,7 @@ Caixa de entrada multi-tenant para webhooks: receba numa URL própria, inspecion
 - **Inspetor em tempo real** via Supabase Realtime: método, horário, tamanho e selo da assinatura de cada requisição; corpo com JSON formatado, headers, query e histórico de entregas.
 - **Verificação de assinatura HMAC-SHA256** compatível com o [legacy-bridge](https://github.com/BernardoCusmanich/legacy-bridge), com janela de ±5 minutos para o timestamp. O status é informativo: a requisição é gravada mesmo com assinatura inválida.
 - **Encaminhamento com retry** pelo Upstash QStash (até 5 novas tentativas), com proteção contra SSRF e botão “Reenviar”.
+- **Alerta por e-mail** (Resend) para os owners da organização quando uma entrega falha de vez: erro permanente, URL recusada ou as 5 novas tentativas esgotadas. No máximo um e-mail por endpoint por hora.
 - **“Copiar como cURL”** e **“Enviar teste”** direto do inspetor.
 - **Multi-tenant**: organizações, papéis (owner e membro), convites por link e seletor de organização, com o isolamento feito por RLS no Postgres.
 - **Segredos cifrados** com AES-256-GCM; `authorization`, `cookie`, `proxy-authorization` e `x-api-key` são gravados como `[redacted]`.
@@ -93,6 +94,10 @@ npm run dev                   # http://localhost:3000
 
 **Rate limit no desenvolvimento.** O `@upstash/ratelimit` usa um recurso de script Lua que só existe no Upstash, então ele não roda contra um Redis comum. Crie um banco Redis gratuito em [console.upstash.com](https://console.upstash.com) e use a URL e o token REST dele. Sem isso, a ingestão funciona normalmente, mas o rate limit fica desligado (fail-open) e um aviso aparece no log.
 
+**Redis local.** `docker compose -f docker-compose.dev.yml up -d` sobe um Redis com a API REST do Upstash em `http://127.0.0.1:8079` (use o mesmo token em `UPSTASH_REDIS_REST_TOKEN` e no compose). Ele atende a trava dos alertas, mas não o rate limit, pelo motivo acima.
+
+**Alertas no desenvolvimento.** Sem `RESEND_API_KEY`, os alertas de falha não são enviados (o log mostra `alerta de falha: disabled`).
+
 **Encaminhamento no desenvolvimento.** A proteção contra SSRF recusa `localhost` e IPs privados também localmente. Para testar uma entrega de verdade, use uma URL pública (por exemplo, um endpoint temporário do webhook.site).
 
 **Login com GitHub local.** Crie um OAuth App com o redirect URI `http://127.0.0.1:54321/auth/v1/callback` e grave as credenciais em `supabase/.env` (fora do git), que o Supabase CLI lê sozinho:
@@ -125,7 +130,7 @@ Outros comandos: `npm run db:types` regenera `lib/supabase/types.ts` a partir do
    Em **Authentication → URL Configuration**, defina o *Site URL* como `https://<seu-app>.vercel.app` e adicione `https://<seu-app>.vercel.app/auth/callback` às *Redirect URLs*. Em **Providers**, mantenha o e-mail com confirmação ligada e configure o GitHub, com o callback que o Supabase mostra.
    Os e-mails de autenticação em português ficam em `supabase/templates` (o Supabase local já os usa). Para aplicá-los no projeto hospedado, rode `npm run email:templates -- <ref>` depois do `supabase login`.
 2. **Upstash:** crie um banco Redis e pegue o token e as signing keys do QStash no console.
-3. **Vercel:** importe o repositório e cadastre todas as variáveis do `.env.example` (sem `QSTASH_URL`). `APP_URL` precisa ser a URL pública final, porque é ela que o QStash chama e que o `/api/deliver` usa para conferir a assinatura.
+3. **Vercel:** importe o repositório e cadastre todas as variáveis do `.env.example` (sem `QSTASH_URL`). `APP_URL` precisa ser a URL pública final, porque é ela que o QStash chama e que o `/api/deliver` usa para conferir a assinatura. `RESEND_API_KEY` (opcional) liga os alertas de falha; `ALERT_EMAIL_FROM` define o remetente, que precisa ser de um domínio verificado no Resend.
 4. Faça o deploy. O build falha se faltar alguma variável.
 5. Rode o seed apontando para produção, uma vez: `npm run seed` com as variáveis de produção num `.env.production.local`. Atenção: enquanto esse arquivo existir, ele tem prioridade sobre o `.env.local`, e o seed vai sempre para produção.
 6. O cron (`vercel.json`) roda todo dia às 03:00 UTC e chama `/api/cron/cleanup` com `Authorization: Bearer $CRON_SECRET`. A Vercel envia esse header sozinha quando a variável `CRON_SECRET` existe.
@@ -160,5 +165,4 @@ Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protectio
 ## Roadmap
 
 - Transformação de payload antes do encaminhamento
-- Alertas por e-mail quando as entregas falharem
 - API pública para listar e reenviar requisições

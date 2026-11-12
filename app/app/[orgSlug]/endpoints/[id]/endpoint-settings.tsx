@@ -127,7 +127,7 @@ export function EndpointSettings({
                 <div>
                   <Label htmlFor="ep-forward">Encaminhamento</Label>
                   <p className="text-xs text-muted-foreground">
-                    Reenvia cada requisição para a URL abaixo, com até 5 novas tentativas.
+                    Reenvia cada requisição para a URL abaixo, com até 5 novas tentativas. Se a entrega falhar de vez, os owners recebem um e-mail (no máximo um por hora).
                   </p>
                 </div>
                 <Switch

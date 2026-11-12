@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FailureInfo } from "@/lib/alerts";
 import { buildForwardHeaders, type sendForward } from "@/lib/forward";
 import { ForwardUrlError } from "@/lib/ssrf";
 
@@ -7,6 +8,9 @@ import { ForwardUrlError } from "@/lib/ssrf";
  * (Supabase, Upstash, env) para poder ser testada com fakes em memória.
  */
 
+/** Retries do QStash por entrega. Na última tentativa, upstash-retried vale MAX_RETRIES. */
+export const MAX_RETRIES = 5;
+
 export type LoadedRequest = {
   id: string;
   org_id: string;
@@ -14,8 +18,8 @@ export type LoadedRequest = {
   headers: unknown;
   body: string | null;
   body_encoding: string;
-  endpoints: { forward_url: string | null; forward_enabled: boolean } | null;
-  organizations: { is_demo: boolean } | null;
+  endpoints: { id: string; name: string; forward_url: string | null; forward_enabled: boolean } | null;
+  organizations: { slug: string; is_demo: boolean } | null;
 };
 
 export type DeliveryRow = {
@@ -33,6 +37,8 @@ export type DeliveryDeps = {
   recordDelivery(row: DeliveryRow): Promise<void>;
   validateForwardUrl(url: string): Promise<URL>;
   sendForward: typeof sendForward;
+  /** Chamado quando a entrega falha de vez. Erros aqui não afetam a resposta ao QStash. */
+  notifyFailure(info: FailureInfo): Promise<void>;
 };
 
 export type DeliveryResult = { status: number; body: Record<string, unknown> };
@@ -91,6 +97,25 @@ export async function handleDelivery(
     });
   }
 
+  async function failedForGood(loaded: LoadedRequest, statusCode: number | null, errorMessage: string) {
+    const ep = loaded.endpoints;
+    if (!ep || !loaded.organizations) return;
+    try {
+      await deps.notifyFailure({
+        orgId: loaded.org_id,
+        orgSlug: loaded.organizations.slug,
+        endpointId: ep.id,
+        endpointName: ep.name,
+        requestId: loaded.id,
+        attempt,
+        statusCode,
+        error: errorMessage.slice(0, 500),
+      });
+    } catch (err) {
+      console.error("[deliver] falha ao enviar alerta", err instanceof Error ? err.message : err);
+    }
+  }
+
   // Na demo pública não há encaminhamento real: registra a tentativa e encerra.
   if (req?.organizations?.is_demo) {
     await record(req, null, "Encaminhamento desativado na demo.", null);
@@ -108,6 +133,7 @@ export async function handleDelivery(
   } catch (err) {
     const message = err instanceof ForwardUrlError ? err.message : "URL de encaminhamento inválida.";
     await record(req, null, message, null);
+    await failedForGood(req, null, message);
     return done("url recusada");
   }
 
@@ -121,8 +147,13 @@ export async function handleDelivery(
 
   await record(req, outcome.statusCode, outcome.kind === "success" ? null : outcome.error, outcome.durationMs);
 
-  if (outcome.kind === "retry") {
+  if (outcome.kind === "retry" && attempt <= MAX_RETRIES) {
     return { status: 500, body: { ok: false, retry: true } };
+  }
+  if (outcome.kind !== "success") {
+    // Falha permanente ou última tentativa: não há mais retry.
+    await failedForGood(req, outcome.statusCode, outcome.error);
+    return done(outcome.kind === "retry" ? "retries esgotados" : outcome.kind);
   }
   return done(outcome.kind);
 }

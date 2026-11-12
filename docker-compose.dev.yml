@@ -1,0 +1,18 @@
+# Redis local com a API REST do Upstash (serverless-redis-http), para o rate limit e a trava
+# de alertas no desenvolvimento. No .env.local:
+#   UPSTASH_REDIS_REST_URL=http://127.0.0.1:8079
+#   UPSTASH_REDIS_REST_TOKEN=<o mesmo valor de SRH_TOKEN abaixo>
+# Uso: UPSTASH_REDIS_REST_TOKEN=... docker compose -f docker-compose.dev.yml up -d
+services:
+  redis:
+    image: redis:7-alpine
+  redis-http:
+    image: hiett/serverless-redis-http:latest
+    ports:
+      - "127.0.0.1:8079:80"
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-hookbox-local-token}
+      SRH_CONNECTION_STRING: redis://redis:6379
+    depends_on:
+      - redis

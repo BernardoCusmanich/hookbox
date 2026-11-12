@@ -2,10 +2,12 @@ import "server-only";
 import { Client, Receiver } from "@upstash/qstash";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { MAX_RETRIES } from "@/lib/deliver";
 import { serverEnv } from "@/lib/env";
 
 let qstash: Client | undefined;
 let receiver: Receiver | undefined;
+let redis: Redis | undefined;
 let limiters: { slug: Ratelimit; ip: Ratelimit } | undefined;
 
 export function qstashClient(): Client {
@@ -24,12 +26,12 @@ export function qstashReceiver(): Receiver {
   return receiver;
 }
 
-/** Enfileira a entrega de uma requisição para o /api/deliver, com até 5 retries. */
+/** Enfileira a entrega de uma requisição para o /api/deliver, com até MAX_RETRIES retries. */
 export async function enqueueDelivery(requestId: string): Promise<void> {
   await qstashClient().publishJSON({
     url: `${serverEnv.APP_URL}/api/deliver`,
     body: { requestId },
-    retries: 5,
+    retries: MAX_RETRIES,
     headers: protectionBypassHeaders(),
   });
 }
@@ -45,21 +47,32 @@ export function protectionBypassHeaders(): Record<string, string> | undefined {
   return { "x-vercel-protection-bypass": secret };
 }
 
+export function redisClient(): Redis {
+  redis ??= new Redis({
+    url: serverEnv.UPSTASH_REDIS_REST_URL,
+    token: serverEnv.UPSTASH_REDIS_REST_TOKEN,
+  });
+  return redis;
+}
+
+/** Trava de alerta por endpoint: true só para o primeiro pedido dentro da janela. */
+export async function acquireAlertThrottle(endpointId: string, seconds: number): Promise<boolean> {
+  const result = await redisClient().set(`hookbox:alert:${endpointId}`, "1", { nx: true, ex: seconds });
+  return result === "OK";
+}
+
 /** Sliding window: 60 req/min por slug e 120 req/min por IP. */
 export function rateLimiters() {
   if (!limiters) {
-    const redis = new Redis({
-      url: serverEnv.UPSTASH_REDIS_REST_URL,
-      token: serverEnv.UPSTASH_REDIS_REST_TOKEN,
-    });
+    const client = redisClient();
     limiters = {
       slug: new Ratelimit({
-        redis,
+        redis: client,
         limiter: Ratelimit.slidingWindow(60, "1 m"),
         prefix: "hookbox:rl:slug",
       }),
       ip: new Ratelimit({
-        redis,
+        redis: client,
         limiter: Ratelimit.slidingWindow(120, "1 m"),
         prefix: "hookbox:rl:ip",
       }),

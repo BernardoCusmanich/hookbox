@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { handleDelivery, type DeliveryDeps, type DeliveryRow, type LoadedRequest } from "@/lib/deliver";
+import type { FailureInfo } from "@/lib/alerts";
+import { handleDelivery, MAX_RETRIES, type DeliveryDeps, type DeliveryRow, type LoadedRequest } from "@/lib/deliver";
 import type { DeliveryOutcome } from "@/lib/forward";
 import { ForwardUrlError } from "@/lib/ssrf";
 
 const REQUEST_ID = "2f1d6a52-9d2e-4c52-8a55-1d3b6f0e9a11";
 const ORG_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const ENDPOINT_ID = "0b6f3c1e-1f2a-4d3b-9c4d-5e6f7a8b9c0d";
+const ENDPOINT = { id: ENDPOINT_ID, name: "Pagamentos" };
 const RAW = JSON.stringify({ requestId: REQUEST_ID });
 
 type SendParams = Parameters<DeliveryDeps["sendForward"]>[0];
@@ -18,8 +21,8 @@ function loaded(overrides: Partial<LoadedRequest> = {}): LoadedRequest {
     headers: { "content-type": "application/json", host: "hookbox.test" },
     body: '{"a":1}',
     body_encoding: "utf8",
-    endpoints: { forward_url: "https://destino.example/hook", forward_enabled: true },
-    organizations: { is_demo: false },
+    endpoints: { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: true },
+    organizations: { slug: "acme", is_demo: false },
     ...overrides,
   };
 }
@@ -29,6 +32,7 @@ function setup(options: {
   loadResult?: Awaited<ReturnType<DeliveryDeps["loadRequest"]>>;
   validate?: (url: string) => Promise<URL>;
   outcome?: DeliveryOutcome & { durationMs: number };
+  notifyError?: Error;
 } = {}) {
   const calls = {
     verify: 0,
@@ -36,6 +40,7 @@ function setup(options: {
     records: [] as DeliveryRow[],
     validated: [] as string[],
     sends: [] as SendParams[],
+    alerts: [] as FailureInfo[],
   };
   const deps: DeliveryDeps = {
     async verifySignature() {
@@ -56,6 +61,10 @@ function setup(options: {
     async sendForward(params) {
       calls.sends.push(params);
       return options.outcome ?? { kind: "success", statusCode: 200, durationMs: 12 };
+    },
+    async notifyFailure(info) {
+      calls.alerts.push(info);
+      if (options.notifyError) throw options.notifyError;
     },
   };
   return { calls, deps };
@@ -119,7 +128,7 @@ describe("handleDelivery", () => {
   });
 
   it("org demo: registra 'desativado' e não envia, mesmo com encaminhamento ligado", async () => {
-    const { calls, deps } = setup({ loadResult: { data: loaded({ organizations: { is_demo: true } }), error: null } });
+    const { calls, deps } = setup({ loadResult: { data: loaded({ organizations: { slug: "demo", is_demo: true } }), error: null } });
     const res = await handleDelivery(input(), deps);
     assert.deepEqual(res, { status: 200, body: { ok: true, message: "encaminhamento desativado na demo" } });
     assert.deepEqual(calls.records, [
@@ -137,7 +146,7 @@ describe("handleDelivery", () => {
   });
 
   it("attempt vem do header upstash-retried", async () => {
-    const { calls, deps } = setup({ loadResult: { data: loaded({ organizations: { is_demo: true } }), error: null } });
+    const { calls, deps } = setup({ loadResult: { data: loaded({ organizations: { slug: "demo", is_demo: true } }), error: null } });
     await handleDelivery(input({ retried: "2" }), deps);
     assert.equal(calls.records[0].attempt, 3);
 
@@ -147,7 +156,7 @@ describe("handleDelivery", () => {
   });
 
   it("encaminhamento desligado: 200 sem gravar nem enviar", async () => {
-    const endpoints = { forward_url: "https://destino.example/hook", forward_enabled: false };
+    const endpoints = { ...ENDPOINT, forward_url: "https://destino.example/hook", forward_enabled: false };
     const { calls, deps } = setup({ loadResult: { data: loaded({ endpoints }), error: null } });
     const res = await handleDelivery(input(), deps);
     assert.deepEqual(res, {
@@ -233,5 +242,80 @@ describe("handleDelivery", () => {
     });
     await handleDelivery(input(), deps);
     assert.equal(calls.records[0].error?.length, 500);
+  });
+
+  describe("alerta de falha definitiva", () => {
+    const retry = { kind: "retry" as const, statusCode: 503, error: "Destino respondeu 503.", durationMs: 40 };
+
+    it("sucesso não alerta", async () => {
+      const { calls, deps } = setup();
+      await handleDelivery(input(), deps);
+      assert.equal(calls.alerts.length, 0);
+    });
+
+    it("retry com tentativas sobrando não alerta", async () => {
+      const { calls, deps } = setup({ outcome: retry });
+      const res = await handleDelivery(input({ retried: String(MAX_RETRIES - 1) }), deps);
+      assert.equal(res.status, 500);
+      assert.equal(calls.alerts.length, 0);
+    });
+
+    it("última tentativa com retry: responde 200 (sem mais retry) e alerta", async () => {
+      const { calls, deps } = setup({ outcome: retry });
+      const res = await handleDelivery(input({ retried: String(MAX_RETRIES) }), deps);
+      assert.deepEqual(res, { status: 200, body: { ok: true, message: "retries esgotados" } });
+      assert.equal(calls.records.length, 1);
+      assert.deepEqual(calls.alerts, [
+        {
+          orgId: ORG_ID,
+          orgSlug: "acme",
+          endpointId: ENDPOINT_ID,
+          endpointName: "Pagamentos",
+          requestId: REQUEST_ID,
+          attempt: MAX_RETRIES + 1,
+          statusCode: 503,
+          error: "Destino respondeu 503.",
+        },
+      ]);
+    });
+
+    it("falha permanente alerta já na primeira tentativa", async () => {
+      const { calls, deps } = setup({
+        outcome: { kind: "permanent", statusCode: 404, error: "Destino respondeu 404.", durationMs: 30 },
+      });
+      await handleDelivery(input(), deps);
+      assert.equal(calls.alerts.length, 1);
+      assert.equal(calls.alerts[0].attempt, 1);
+      assert.equal(calls.alerts[0].statusCode, 404);
+    });
+
+    it("URL recusada pelo SSRF alerta", async () => {
+      const { calls, deps } = setup({
+        validate: async () => {
+          throw new ForwardUrlError("Destino é um endereço bloqueado.");
+        },
+      });
+      await handleDelivery(input(), deps);
+      assert.equal(calls.alerts.length, 1);
+      assert.equal(calls.alerts[0].statusCode, null);
+      assert.equal(calls.alerts[0].error, "Destino é um endereço bloqueado.");
+    });
+
+    it("org demo e encaminhamento desligado não alertam", async () => {
+      const demo = setup({ loadResult: { data: loaded({ organizations: { slug: "demo", is_demo: true } }), error: null } });
+      await handleDelivery(input(), demo.deps);
+      const off = setup({
+        loadResult: { data: loaded({ endpoints: { ...ENDPOINT, forward_url: null, forward_enabled: false } }), error: null },
+      });
+      await handleDelivery(input(), off.deps);
+      assert.equal(demo.calls.alerts.length + off.calls.alerts.length, 0);
+    });
+
+    it("erro no alerta não muda a resposta ao QStash", async () => {
+      const { calls, deps } = setup({ outcome: retry, notifyError: new Error("resend fora") });
+      const res = await handleDelivery(input({ retried: String(MAX_RETRIES) }), deps);
+      assert.deepEqual(res, { status: 200, body: { ok: true, message: "retries esgotados" } });
+      assert.equal(calls.alerts.length, 1);
+    });
   });
 });
