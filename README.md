@@ -153,7 +153,7 @@ Para mandar um webhook externo para uma preview, acrescente `?x-vercel-protectio
 
 **Outras escolhas.**
 - `proxy.ts` (o antigo `middleware.ts` do Next.js 16) renova a sessão, protege `/app/**` e manda para o onboarding quem ainda não tem organização.
-- A conta demo é compartilhada, então tem papel de *membro* (não mexe em membros, convites nem no nome da org), não cria organizações e não consegue trocar a própria senha ou o e-mail (um trigger em `auth.users` descarta a mudança). Os endpoints de exemplo não podem ser excluídos, e o cron restaura tudo por dia.
+- A conta demo é compartilhada, então tem papel de *membro* (não mexe em membros, convites nem no nome da org), não cria organizações e não consegue trocar a própria senha ou o e-mail (um trigger em `auth.users` descarta a mudança). As travas também estão no banco (triggers da migration `demo_guards`), e só agem quando quem chama é a conta demo, então o seed e o cron passam. Na demo não dá para mudar o encaminhamento nem gerar ou remover o segredo. Revelar o segredo continua liberado, para testar a assinatura. Os endpoints de exemplo e a org não podem ser excluídos, e o cron restaura tudo por dia. O `/api/deliver` não envia nada para orgs demo: registra a entrega como "Encaminhamento desativado na demo.".
 - O Supabase Auth não separa um cadastro por senha de um por magic link. O cadastro por senha não aparece na interface, a confirmação de e-mail fica obrigatória e o aceite de convite exige e-mail confirmado. Assim, uma conta criada direto pela API com o e-mail de outra pessoa não consegue tomar um convite.
 - Corpos que não são UTF-8 válido (ou que contêm `\0`, que o Postgres não aceita em `text`) são gravados em base64 e reenviados com os bytes originais.
 
